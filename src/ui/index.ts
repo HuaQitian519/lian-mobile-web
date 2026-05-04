@@ -7,6 +7,8 @@ export { default as LocationChip } from "./LocationChip.vue";
 export { default as Sheet } from "./Sheet.vue";
 export { default as TagChip } from "./TagChip.vue";
 export { default as Toast } from "./Toast.vue";
+export { default as ToastHost } from "./feedback/ToastHost.vue";
+export { useToast } from "./feedback/useToast";
 export { default as TopBar } from "./TopBar.vue";
 export { default as TrustBadge } from "./TrustBadge.vue";
 export { default as TypeChip } from "./TypeChip.vue";
