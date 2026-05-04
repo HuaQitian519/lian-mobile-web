@@ -1,7 +1,9 @@
 const tokenInput = document.querySelector("#adminToken");
 const publicBaseInput = document.querySelector("#publicBase");
 const runButton = document.querySelector("#runHealth");
+const actionButtons = [...document.querySelectorAll("[data-action]")];
 const summary = document.querySelector("#summary");
+const actionStatus = document.querySelector("#actionStatus");
 const checks = document.querySelector("#checks");
 const raw = document.querySelector("#raw");
 
@@ -11,9 +13,30 @@ const BASE_KEY = "lian.ops.publicBase";
 tokenInput.value = localStorage.getItem(TOKEN_KEY) || "";
 publicBaseInput.value = localStorage.getItem(BASE_KEY) || publicBaseInput.value;
 
+function authToken() {
+  return tokenInput.value.trim();
+}
+
+function saveInputs() {
+  localStorage.setItem(TOKEN_KEY, authToken());
+  localStorage.setItem(BASE_KEY, publicBaseInput.value.trim() || "https://lian.nat100.top");
+}
+
 function setSummary(text, ok = null) {
   summary.textContent = text;
   summary.className = `status ${ok === true ? "ok" : ok === false ? "bad" : "muted"}`;
+}
+
+function setActionStatus(text, ok = null) {
+  actionStatus.textContent = text;
+  actionStatus.className = `status ${ok === true ? "ok" : ok === false ? "bad" : "muted"}`;
+}
+
+function setBusy(isBusy) {
+  runButton.disabled = isBusy;
+  actionButtons.forEach((button) => {
+    button.disabled = isBusy;
+  });
 }
 
 function renderChecks(items = []) {
@@ -41,18 +64,20 @@ function escapeHtml(value = "") {
     .replace(/\"/g, "&quot;");
 }
 
-async function runHealthCheck() {
-  const token = tokenInput.value.trim();
-  const publicBase = publicBaseInput.value.trim() || "https://lian.nat100.top";
-  if (!token) {
-    setSummary("请先输入 ADMIN_TOKEN", false);
-    tokenInput.focus();
-    return;
-  }
+function requireToken() {
+  if (authToken()) return true;
+  setSummary("请先输入 ADMIN_TOKEN", false);
+  setActionStatus("请先输入 ADMIN_TOKEN", false);
+  tokenInput.focus();
+  return false;
+}
 
-  localStorage.setItem(TOKEN_KEY, token);
-  localStorage.setItem(BASE_KEY, publicBase);
-  runButton.disabled = true;
+async function runHealthCheck() {
+  const publicBase = publicBaseInput.value.trim() || "https://lian.nat100.top";
+  if (!requireToken()) return;
+
+  saveInputs();
+  setBusy(true);
   setSummary("检查中...", null);
   raw.textContent = "{}";
   renderChecks([]);
@@ -60,7 +85,7 @@ async function runHealthCheck() {
   try {
     const response = await fetch(`/api/ops/health?publicBase=${encodeURIComponent(publicBase)}`, {
       headers: {
-        authorization: `Bearer ${token}`,
+        authorization: `Bearer ${authToken()}`,
         accept: "application/json"
       },
       credentials: "include"
@@ -76,8 +101,44 @@ async function runHealthCheck() {
   } catch (error) {
     setSummary(error?.message || "检查失败", false);
   } finally {
-    runButton.disabled = false;
+    setBusy(false);
+  }
+}
+
+async function runOpsAction(action) {
+  if (!requireToken()) return;
+  const label = document.querySelector(`[data-action="${action}"]`)?.textContent?.trim() || action;
+  if (!confirm(`确认执行：${label}？`)) return;
+
+  saveInputs();
+  setBusy(true);
+  setActionStatus(`${label} 已提交，等待后台执行...`, null);
+
+  try {
+    const response = await fetch(`/api/ops/action?action=${encodeURIComponent(action)}`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${authToken()}`,
+        accept: "application/json"
+      },
+      credentials: "include"
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) {
+      setActionStatus(data.error || `${label} 触发失败，HTTP ${response.status}`, false);
+      raw.textContent = JSON.stringify(data, null, 2);
+      return;
+    }
+    setActionStatus(`${label} 已触发。日志：${data.logPath || "见 /tmp/lian-ops-*.log"}。稍等几秒后运行健康检查。`, true);
+    raw.textContent = JSON.stringify(data, null, 2);
+  } catch (error) {
+    setActionStatus(error?.message || `${label} 触发失败`, false);
+  } finally {
+    setBusy(false);
   }
 }
 
 runButton.addEventListener("click", runHealthCheck);
+actionButtons.forEach((button) => {
+  button.addEventListener("click", () => runOpsAction(button.dataset.action));
+});
